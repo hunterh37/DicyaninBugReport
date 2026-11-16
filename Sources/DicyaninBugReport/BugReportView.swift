@@ -15,6 +15,12 @@ struct BugReporterModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .alert("Report a bug?", isPresented: Binding(
+                get: { reporter.asking },
+                set: { if !$0 && reporter.asking { reporter.answer(false) } })) {
+                Button("Report") { reporter.answer(true) }
+                Button("Not Now", role: .cancel) { reporter.answer(false) }
+            }
             .sheet(item: $reporter.draft) { _ in
                 BugComposeView(reporter: reporter)
                     .presentationDetents([.large])
@@ -70,9 +76,14 @@ struct BugComposeView: View {
             TextField("What went wrong?", text: Binding(
                 get: { reporter.draft?.note ?? "" },
                 set: { reporter.draft?.note = $0 }), axis: .vertical)
-                .lineLimit(1...4)
+                .lineLimit(4...10)
                 .focused($focused)
                 .font(.body)
+                .padding(14)
+                .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .onTapGesture { focused = true }
             Button {
                 if let png = reporter.draft?.png, let flat = BugMarkup.flatten(png, strokes: strokes) {
                     reporter.draft?.png = flat
@@ -112,7 +123,7 @@ struct BugListView: View {
                         StatusDot(on: r.delivered)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityValue(r.delivered ? "Received by Cadence" : "Saved on device")
+                    .accessibilityValue(r.delivered ? (r.cloudAt != nil ? "Stored in iCloud" : "Received by Cadence") : "Saved on device")
                 }
                 .onDelete { s in s.map { reporter.reports[$0].id }.forEach(reporter.delete) }
             }

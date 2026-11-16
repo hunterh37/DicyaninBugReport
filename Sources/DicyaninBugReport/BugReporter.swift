@@ -23,6 +23,15 @@ public final class BugReporter {
     /// Optional app state dump (selected filters, edits, tweaks), included in each report.
     public var context: (() -> String?)?
     public var enabled = true
+    /// Shake or screenshot first asks "Report a bug?" before opening the sheet.
+    public var askFirst = true
+    /// The "Report a bug?" prompt is showing.
+    public var asking = false
+    @ObservationIgnored private var pendingPNG: Data?
+    @ObservationIgnored private var pendingScreen: String?
+    @ObservationIgnored private var pendingContext: String?
+    /// CloudKit container in use, nil when reports go to Cadence only.
+    public private(set) var cloudContainer: String?
 
     public struct Draft: Identifiable, Equatable {
         public let id = UUID()
@@ -34,15 +43,26 @@ public final class BugReporter {
 
     @ObservationIgnored let outbox: BugOutbox
     @ObservationIgnored private var sync: BugSync?
+    @ObservationIgnored private var cloud: BugCloud?
+    @ObservationIgnored private var activeObserver: NSObjectProtocol?
     @ObservationIgnored private(set) var project = ""
     @ObservationIgnored private var screenshotObserver: NSObjectProtocol?
 
     init(outbox: BugOutbox = BugOutbox()) { self.outbox = outbox }
 
-    public func install(project: String) {
+    /// `cloudContainer`: CloudKit container id (e.g. iCloud.org.dicyaninlabs.app). Reports upload to its
+    /// public database as `BugReport` records in addition to Cadence on the local network.
+    public func install(project: String, cloudContainer: String? = nil) {
         guard sync == nil else { return }
         self.project = project
+        self.cloudContainer = cloudContainer
         outbox.prune()
+        if let cloudContainer {
+            let c = BugCloud(containerID: cloudContainer, outbox: outbox)
+            c.onChange = { Task { @MainActor in BugReporter.shared.reload() } }
+            cloud = c
+            c.sync()
+        }
         let s = BugSync(outbox: outbox)
         s.onChange = { up in
             Task { @MainActor in
@@ -54,15 +74,39 @@ public final class BugReporter {
         s.start()
         reload()
         #if canImport(UIKit) && !os(visionOS)
-        ShakeHook.onShake = { BugReporter.shared.begin() }
+        ShakeHook.onShake = { BugReporter.shared.trigger() }
         screenshotObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.userDidTakeScreenshotNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { BugReporter.shared.begin() }
+            MainActor.assumeIsolated { BugReporter.shared.trigger() }
+        }
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { BugReporter.shared.syncNow() }
         }
         #endif
     }
 
     func reload() { reports = outbox.all() }
+
+    /// Shake or screenshot. Captures the screen now, then asks "Report a bug?" when `askFirst` is on.
+    public func trigger() {
+        guard enabled, draft == nil, !asking else { return }
+        guard askFirst else { begin(); return }
+        pendingPNG = Self.capture(); pendingScreen = screenName?(); pendingContext = context?()
+        asking = true
+    }
+
+    /// Answer to the "Report a bug?" prompt.
+    public func answer(_ report: Bool) {
+        asking = false
+        let png = pendingPNG, screen = pendingScreen, ctx = pendingContext
+        pendingPNG = nil; pendingScreen = nil; pendingContext = nil
+        guard report else { return }
+        // The alert must finish dismissing before the sheet presents.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            MainActor.assumeIsolated { BugReporter.shared.draft = Draft(png: png, screen: screen, context: ctx) }
+        }
+    }
 
     /// Captures the key window and opens the sheet.
     public func begin() {
@@ -80,10 +124,10 @@ public final class BugReporter {
         try? outbox.save(r, png: d.png)
         draft = nil
         reload()
-        sync?.sync()
+        syncNow()
     }
 
-    public func syncNow() { sync?.sync() }
+    public func syncNow() { sync?.sync(); cloud?.sync() }
 
     public func delete(_ id: UUID) { outbox.remove(id); reload() }
 
