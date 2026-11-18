@@ -44,6 +44,7 @@ public final class BugReporter {
     @ObservationIgnored let outbox: BugOutbox
     @ObservationIgnored private var sync: BugSync?
     @ObservationIgnored private var cloud: BugCloud?
+    @ObservationIgnored private var server: BugServer?
     @ObservationIgnored private var activeObserver: NSObjectProtocol?
     @ObservationIgnored private(set) var project = ""
     @ObservationIgnored private var screenshotObserver: NSObjectProtocol?
@@ -52,7 +53,8 @@ public final class BugReporter {
 
     /// `cloudContainer`: CloudKit container id (e.g. iCloud.org.dicyaninlabs.app). Reports upload to its
     /// public database as `BugReport` records in addition to Cadence on the local network.
-    public func install(project: String, cloudContainer: String? = nil) {
+    /// `server`: HTTP bug server (Render). Cadence pulls from it, so reports reach Cadence off the local network.
+    public func install(project: String, cloudContainer: String? = nil, server: BugServerConfig? = nil) {
         guard sync == nil else { return }
         self.project = project
         self.cloudContainer = cloudContainer
@@ -62,6 +64,12 @@ public final class BugReporter {
             c.onChange = { Task { @MainActor in BugReporter.shared.reload() } }
             cloud = c
             c.sync()
+        }
+        if let server {
+            let h = BugServer(config: server, outbox: outbox)
+            h.onChange = { Task { @MainActor in BugReporter.shared.reload() } }
+            self.server = h
+            h.sync()
         }
         let s = BugSync(outbox: outbox)
         s.onChange = { up in
@@ -127,7 +135,7 @@ public final class BugReporter {
         syncNow()
     }
 
-    public func syncNow() { sync?.sync(); cloud?.sync() }
+    public func syncNow() { sync?.sync(); cloud?.sync(); server?.sync() }
 
     public func delete(_ id: UUID) { outbox.remove(id); reload() }
 

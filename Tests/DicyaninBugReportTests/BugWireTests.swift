@@ -52,4 +52,26 @@ final class BugWireTests: XCTestCase {
         box.remove(r.id)
         XCTAssertTrue(box.all().isEmpty)
     }
+
+    func testServerBodyCarriesShot() throws {
+        let r = report()
+        let o = try XCTUnwrap(JSONSerialization.jsonObject(with: BugServer.body(r, png: Data([9, 8]))) as? [String: Any])
+        XCTAssertEqual(o["shot"] as? String, Data([9, 8]).base64EncodedString())
+        XCTAssertEqual(o["id"] as? String, r.id.uuidString)
+    }
+
+    /// Live round trip. Runs when BUG_E2E_URL and BUG_E2E_KEY are set.
+    func testServerUploadLive() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let u = env["BUG_E2E_URL"].flatMap(URL.init(string:)), let k = env["BUG_E2E_KEY"] else { throw XCTSkip("no BUG_E2E_URL") }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let box = BugOutbox(root: root)
+        var r = report(); r.project = "E2ETest"; r.note = "swift e2e"
+        try box.save(r, png: Data([0x89, 0x50, 0x4E, 0x47]))
+        await BugServer(config: .init(url: u, key: k), outbox: box).run()
+        let back = try XCTUnwrap(box.all().first)
+        XCTAssertNotNil(back.serverAt)
+        XCTAssertEqual(back.state, .received)
+        print("E2E_ID", r.id.uuidString.lowercased())
+    }
 }

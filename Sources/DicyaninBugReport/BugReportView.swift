@@ -123,7 +123,7 @@ struct BugListView: View {
                         StatusDot(on: r.delivered)
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityValue(r.delivered ? (r.cloudAt != nil ? "Stored in iCloud" : "Received by Cadence") : "Saved on device")
+                    .accessibilityValue(r.delivered ? (r.serverAt != nil ? "Stored on server" : r.cloudAt != nil ? "Stored in iCloud" : "Received by Cadence") : "Saved on device")
                 }
                 .onDelete { s in s.map { reporter.reports[$0].id }.forEach(reporter.delete) }
             }

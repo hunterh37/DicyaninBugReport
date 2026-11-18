@@ -19,6 +19,8 @@ public struct BugReport: Codable, Identifiable, Equatable, Sendable {
     public var receivedAt: Date?
     /// Set when the CloudKit public database stored it.
     public var cloudAt: Date?
+    /// Set when the HTTP bug server stored it.
+    public var serverAt: Date?
     /// Cadence state: received, working, fixed.
     public var state: BugState
 
@@ -30,7 +32,7 @@ public struct BugReport: Codable, Identifiable, Equatable, Sendable {
         self.screen = screen; self.context = context; self.created = created; self.receivedAt = receivedAt; self.state = state
     }
 
-    public var delivered: Bool { state != .queued || cloudAt != nil }
+    public var delivered: Bool { state != .queued || cloudAt != nil || serverAt != nil }
 }
 
 public enum BugState: String, Codable, Sendable, CaseIterable {
